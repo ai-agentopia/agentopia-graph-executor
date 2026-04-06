@@ -199,6 +199,146 @@ def test_finalize_bad_plan_with_revision_count():
     assert result.revision_count >= 2
 
 
+# ── Blocking 3: Malformed packet schema → validation, not crash ───────
+
+
+def test_malformed_packet_missing_title():
+    """Packet with no title triggers revision, not crash."""
+
+    def mock_llm(messages):
+        return json.dumps({
+            "milestone_title": "M",
+            "issue_title": "Issue",
+            "issue_body": "body",
+            "packets": [
+                {
+                    "objective": "Implement the full feature end to end",
+                    "assigned_role": "worker",
+                    "in_scope": ["Build it"],
+                    "acceptance_criteria": ["Tests pass"],
+                }
+            ],
+        })
+
+    result = invoke_planner(PlannerInput(objective_text="Test"), llm=mock_llm, max_revisions=1)
+    # Should not crash — missing title caught by validation
+    assert isinstance(result, DeliveryPlan)
+    assert not result.valid or result.revision_count >= 1
+
+
+def test_malformed_packet_not_a_dict():
+    """Packet that is a string instead of dict → validation error, not crash."""
+
+    def mock_llm(messages):
+        return json.dumps({
+            "milestone_title": "M",
+            "issue_title": "Issue",
+            "issue_body": "body",
+            "packets": ["this is not a dict"],
+        })
+
+    result = invoke_planner(PlannerInput(objective_text="Test"), llm=mock_llm, max_revisions=1)
+    assert isinstance(result, DeliveryPlan)
+    assert not result.valid
+
+
+def test_malformed_packet_wrong_field_types():
+    """Packet with wrong field types (e.g. int objective) → handled gracefully."""
+
+    def mock_llm(messages):
+        return json.dumps({
+            "milestone_title": "M",
+            "issue_title": "Issue",
+            "issue_body": "body",
+            "packets": [
+                {
+                    "title": 12345,
+                    "objective": True,
+                    "assigned_role": "worker",
+                    "in_scope": "not a list",
+                    "acceptance_criteria": 42,
+                }
+            ],
+        })
+
+    result = invoke_planner(PlannerInput(objective_text="Test"), llm=mock_llm, max_revisions=1)
+    assert isinstance(result, DeliveryPlan)
+    assert not result.valid
+
+
+def test_malformed_packet_extra_unknown_keys():
+    """Packet with extra unknown keys → still parsed or caught, not crash."""
+
+    def mock_llm(messages):
+        return json.dumps({
+            "milestone_title": "M",
+            "issue_title": "Issue",
+            "issue_body": "body",
+            "packets": [
+                {
+                    "title": "Good title",
+                    "objective": "Implement full feature with auth",
+                    "assigned_role": "worker",
+                    "in_scope": ["Build auth module"],
+                    "acceptance_criteria": ["Auth tests pass"],
+                    "unknown_field": "surprise",
+                }
+            ],
+        })
+
+    result = invoke_planner(PlannerInput(objective_text="Test"), llm=mock_llm, max_revisions=1)
+    assert isinstance(result, DeliveryPlan)
+    # Either valid (extra keys ignored) or invalid (schema error), but never crash
+
+
+def test_malformed_packet_objective_too_short():
+    """Packet with objective under 5 chars → validation error."""
+
+    def mock_llm(messages):
+        return json.dumps({
+            "milestone_title": "M",
+            "issue_title": "Issue",
+            "issue_body": "body",
+            "packets": [
+                {
+                    "title": "Short",
+                    "objective": "Hi",
+                    "assigned_role": "worker",
+                    "in_scope": ["Build it"],
+                    "acceptance_criteria": ["Tests pass"],
+                }
+            ],
+        })
+
+    result = invoke_planner(PlannerInput(objective_text="Test"), llm=mock_llm, max_revisions=1)
+    assert isinstance(result, DeliveryPlan)
+    assert not result.valid
+
+
+def test_malformed_packet_empty_title_string():
+    """Packet with empty string title → validation error."""
+
+    def mock_llm(messages):
+        return json.dumps({
+            "milestone_title": "M",
+            "issue_title": "Issue",
+            "issue_body": "body",
+            "packets": [
+                {
+                    "title": "",
+                    "objective": "Implement the full feature end to end",
+                    "assigned_role": "worker",
+                    "in_scope": ["Build it"],
+                    "acceptance_criteria": ["Tests pass"],
+                }
+            ],
+        })
+
+    result = invoke_planner(PlannerInput(objective_text="Test"), llm=mock_llm, max_revisions=1)
+    assert isinstance(result, DeliveryPlan)
+    assert not result.valid
+
+
 # ── Graph structure ───────────────────────────────────────────────────
 
 

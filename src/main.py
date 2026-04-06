@@ -30,7 +30,10 @@ def _verify_token(
 ) -> None:
     expected = os.environ.get("GRAPH_EXECUTOR_TOKEN", "")
     if not expected:
-        return  # token enforcement disabled (dev mode)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="GRAPH_EXECUTOR_TOKEN not configured — service cannot authenticate requests",
+        )
     if creds is None or creds.credentials != expected:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -94,9 +97,17 @@ async def invoke_graph(
     run_id = str(uuid.uuid4())
     model_used = body.config.model or os.environ.get("GRAPH_MODEL", "gpt-4o-mini")
 
-    # Build LLM callable only when LLM_BASE_URL is configured
+    # Build LLM callable — required unless GRAPH_STUB_MODE=1 (test/dev only)
     llm = None
-    if os.environ.get("LLM_BASE_URL"):
+    stub_mode = os.environ.get("GRAPH_STUB_MODE", "") == "1"
+    if stub_mode:
+        llm = None  # explicit: caller opted into deterministic stub
+    elif not os.environ.get("LLM_BASE_URL"):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM not configured: LLM_BASE_URL is required (set GRAPH_STUB_MODE=1 for test/dev only)",
+        )
+    else:
         try:
             llm = build_llm_callable(
                 model=model_used,

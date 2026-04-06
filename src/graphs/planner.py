@@ -163,15 +163,28 @@ def validate(state: PlannerState) -> dict[str, Any]:
         errors.append(f"Too many packets: {len(packets)} > {max_packets}")
 
     for i, p in enumerate(packets[:max_packets]):
-        if not p.get("objective", "").strip():
+        if not isinstance(p, dict):
+            errors.append(f"Packet {i}: not a dict")
+            continue
+        title = p.get("title")
+        if not title or not isinstance(title, str) or not title.strip():
+            errors.append(f"Packet {i}: missing or empty title")
+        objective = p.get("objective")
+        if not objective or not isinstance(objective, str) or not objective.strip():
             errors.append(f"Packet {i}: missing objective")
+        elif len(objective.strip()) < 5:
+            errors.append(f"Packet {i}: objective too short (min 5 chars)")
         criteria = p.get("acceptance_criteria", [])
-        if not criteria:
+        if not isinstance(criteria, list):
+            errors.append(f"Packet {i}: acceptance_criteria is not a list")
+        elif not criteria:
             errors.append(f"Packet {i}: empty acceptance_criteria")
         elif _is_generic(criteria):
             errors.append(f"Packet {i}: acceptance_criteria are too generic")
         in_scope = p.get("in_scope", [])
-        if not in_scope:
+        if not isinstance(in_scope, list):
+            errors.append(f"Packet {i}: in_scope is not a list")
+        elif not in_scope:
             errors.append(f"Packet {i}: empty in_scope")
         elif _is_generic(in_scope):
             errors.append(f"Packet {i}: in_scope is too generic")
@@ -180,12 +193,19 @@ def validate(state: PlannerState) -> dict[str, Any]:
         # Signal retry — do NOT build plan yet
         return {"revision_count": state.revision_count + 1, "plan": None}
 
-    # Build plan (may be invalid if revision budget exhausted)
+    # Build validated packets — catch model construction errors
+    valid_packets: list[PacketPlan] = []
+    for i, p in enumerate(packets[:max_packets]):
+        try:
+            valid_packets.append(PacketPlan(**p))
+        except Exception as exc:
+            errors.append(f"Packet {i}: schema error — {exc}")
+
     plan = DeliveryPlan(
         milestone_title=raw.get("milestone_title", ""),
         issue_title=raw.get("issue_title", ""),
         issue_body=raw.get("issue_body", ""),
-        packets=[PacketPlan(**p) for p in packets[:max_packets]] if packets else [],
+        packets=valid_packets,
         revision_count=state.revision_count,
         valid=len(errors) == 0,
         validation_errors=errors,
@@ -201,11 +221,18 @@ def finalize(state: PlannerState) -> dict[str, Any]:
     packets = raw.get("packets", [])
     max_packets: int = state.input.get("max_packets", 1)
 
+    valid_packets: list[PacketPlan] = []
+    for p in packets[:max_packets]:
+        try:
+            valid_packets.append(PacketPlan(**p))
+        except Exception:
+            pass  # best-effort: skip malformed packets in finalize
+
     plan = DeliveryPlan(
         milestone_title=raw.get("milestone_title", ""),
         issue_title=raw.get("issue_title", "Untitled"),
         issue_body=raw.get("issue_body", ""),
-        packets=[PacketPlan(**p) for p in packets[:max_packets]] if packets else [],
+        packets=valid_packets,
         revision_count=state.revision_count,
         valid=False,
         validation_errors=["Revision budget exhausted — plan may be incomplete"],

@@ -1,11 +1,14 @@
 """API integration tests for graph-executor service.
 
-Uses TestClient (sync httpx). No real LLM calls — LLM_BASE_URL is unset.
+Uses TestClient (sync httpx). No real LLM calls.
+Tests run with GRAPH_STUB_MODE=1 (explicit test-only stub).
 AC coverage:
   AC1  — /health returns available graphs
   AC2  — authenticated planner invoke returns typed output
   AC3  — unknown graph → 404
   AC4  — auth rejects unauthorized calls
+  AC-auth-closed — missing token → 503 (fail closed)
+  AC-llm-required — missing LLM config without GRAPH_STUB_MODE → 503
 """
 
 from __future__ import annotations
@@ -20,7 +23,8 @@ sys.path.insert(0, "src")
 
 # Set required env before importing app
 os.environ.setdefault("GRAPH_EXECUTOR_TOKEN", "test-secret-token")
-# Ensure LLM not configured (stub mode)
+# Explicit stub mode for tests (no LLM required)
+os.environ["GRAPH_STUB_MODE"] = "1"
 os.environ.pop("LLM_BASE_URL", None)
 
 from main import app  # noqa: E402
@@ -119,16 +123,36 @@ def test_planner_invoke_run_id_is_uuid():
     uuid.UUID(run_id)  # raises ValueError if not valid UUID
 
 
-def test_planner_invoke_no_token_env_skips_auth():
-    """When GRAPH_EXECUTOR_TOKEN is unset, auth is disabled (dev mode)."""
+def test_auth_fails_closed_when_token_unset():
+    """AC-auth-closed — missing GRAPH_EXECUTOR_TOKEN → 503, not silent pass."""
     original = os.environ.pop("GRAPH_EXECUTOR_TOKEN", None)
     try:
         resp = client.post(
             "/v1/graphs/planner/invoke",
-            json={"input": {"objective_text": "Test dev mode"}, "config": {}},
-            # No auth header
+            json={"input": {"objective_text": "Test fail-closed"}, "config": {}},
+            headers={"Authorization": "Bearer anything"},
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 503
+        assert "GRAPH_EXECUTOR_TOKEN" in resp.json()["detail"]
     finally:
         if original:
             os.environ["GRAPH_EXECUTOR_TOKEN"] = original
+
+
+def test_llm_required_when_stub_mode_off():
+    """AC-llm-required — without GRAPH_STUB_MODE and LLM_BASE_URL, invoke returns 503."""
+    original_stub = os.environ.pop("GRAPH_STUB_MODE", None)
+    original_llm = os.environ.pop("LLM_BASE_URL", None)
+    try:
+        resp = client.post(
+            "/v1/graphs/planner/invoke",
+            json={"input": {"objective_text": "Test llm required"}, "config": {}},
+            headers=AUTH,
+        )
+        assert resp.status_code == 503
+        assert "LLM_BASE_URL" in resp.json()["detail"]
+    finally:
+        if original_stub:
+            os.environ["GRAPH_STUB_MODE"] = original_stub
+        if original_llm:
+            os.environ["LLM_BASE_URL"] = original_llm
