@@ -21,8 +21,8 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, "src")
 
-# Set required env before importing app
-os.environ.setdefault("GRAPH_EXECUTOR_TOKEN", "test-secret-token")
+# Set required env before importing app — force override to ensure test token matches
+os.environ["GRAPH_EXECUTOR_TOKEN"] = "test-secret-token"
 # Explicit stub mode for tests (no LLM required)
 os.environ["GRAPH_STUB_MODE"] = "1"
 os.environ.pop("LLM_BASE_URL", None)

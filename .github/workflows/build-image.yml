@@ -23,7 +23,7 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Run tests
-        run: PYTHONPATH=src GRAPH_EXECUTOR_TOKEN=ci-test GRAPH_STUB_MODE=1 pytest tests/ -v
+        run: PYTHONPATH=src GRAPH_STUB_MODE=1 pytest tests/ -v
 
   build-push:
     needs: test
