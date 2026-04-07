@@ -95,7 +95,7 @@ async def invoke_graph(
 
     handler = REGISTRY[graph_name]
     run_id = str(uuid.uuid4())
-    model_used = body.config.model or os.environ.get("GRAPH_MODEL", "gpt-4o-mini")
+    model_used = body.config.model or os.environ.get("GRAPH_MODEL", "openrouter/google/gemini-2.0-flash-001")
 
     # Build LLM callable — required unless GRAPH_STUB_MODE=1 (test/dev only)
     llm = None
