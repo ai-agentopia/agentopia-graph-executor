@@ -258,20 +258,34 @@ def decide(state: ReviewerState) -> dict[str, Any]:
         except Exception:
             pass  # skip malformed findings
 
-    # Build result
-    verdict = raw.get("verdict", "REQUEST_CHANGES")
-    if verdict not in ("APPROVE", "REQUEST_CHANGES"):
+    # Collect structured evidence
+    criteria_unmet = raw.get("criteria_unmet", [])
+    prior_remaining = reconciled.get("prior_issues_remaining", [])
+    has_error_findings = any(f.severity == "error" for f in findings)
+
+    # Normalize verdict against evidence — never APPROVE with contradicting evidence
+    raw_verdict = raw.get("verdict", "REQUEST_CHANGES")
+    if raw_verdict not in ("APPROVE", "REQUEST_CHANGES"):
+        raw_verdict = "REQUEST_CHANGES"
+
+    if criteria_unmet:
         verdict = "REQUEST_CHANGES"
+    elif has_error_findings:
+        verdict = "REQUEST_CHANGES"
+    elif is_rework and prior_remaining:
+        verdict = "REQUEST_CHANGES"
+    else:
+        verdict = raw_verdict
 
     result = ReviewAnalysis(
         verdict=verdict,
         summary=raw.get("summary", ""),
         findings=findings,
         criteria_met=raw.get("criteria_met", []),
-        criteria_unmet=raw.get("criteria_unmet", []),
+        criteria_unmet=criteria_unmet,
         is_rework=is_rework,
         prior_issues_addressed=reconciled.get("prior_issues_addressed", []),
-        prior_issues_remaining=reconciled.get("prior_issues_remaining", []),
+        prior_issues_remaining=prior_remaining,
     )
 
     return {"result": result, "done": True}

@@ -303,3 +303,136 @@ def test_llm_rework_reconciliation():
     assert result.is_rework
     assert result.prior_issues_addressed == ["Fix bug A"]
     assert result.prior_issues_remaining == ["Add test B"]
+    # Normalization: unresolved prior issues → verdict forced to REQUEST_CHANGES
+    assert result.verdict == "REQUEST_CHANGES"
+
+
+# ── Verdict normalization tests ───────────────────────────────────────
+
+
+def test_normalize_approve_with_criteria_unmet():
+    """LLM says APPROVE but criteria_unmet non-empty → REQUEST_CHANGES."""
+
+    def mock_llm(messages):
+        return json.dumps({
+            "verdict": "APPROVE",
+            "summary": "Looks good to me",
+            "findings": [],
+            "criteria_met": ["Tests pass"],
+            "criteria_unmet": ["Security review needed"],
+        })
+
+    result = invoke_reviewer(
+        ReviewInput(
+            pr_diff="+ code",
+            acceptance_criteria=["Tests pass", "Security review needed"],
+            pr_title="feat: test",
+            file_names=["a.py"],
+        ),
+        llm=mock_llm,
+    )
+    assert result.verdict == "REQUEST_CHANGES"
+    assert result.criteria_unmet == ["Security review needed"]
+
+
+def test_normalize_approve_with_error_findings():
+    """LLM says APPROVE but findings contain error severity → REQUEST_CHANGES."""
+
+    def mock_llm(messages):
+        return json.dumps({
+            "verdict": "APPROVE",
+            "summary": "Minor issues only",
+            "findings": [
+                {"file": "src/main.py", "line": 10, "body": "SQL injection risk",
+                 "severity": "error", "category": "security"},
+            ],
+            "criteria_met": ["Tests pass"],
+            "criteria_unmet": [],
+        })
+
+    result = invoke_reviewer(
+        ReviewInput(
+            pr_diff="+ code",
+            acceptance_criteria=["Tests pass"],
+            pr_title="feat: test",
+            file_names=["src/main.py"],
+        ),
+        llm=mock_llm,
+    )
+    assert result.verdict == "REQUEST_CHANGES"
+    assert any(f.severity == "error" for f in result.findings)
+
+
+def test_normalize_rework_with_prior_remaining():
+    """Rework round: LLM says APPROVE but prior_issues_remaining → REQUEST_CHANGES."""
+    call_count = 0
+
+    def mock_llm(messages):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return json.dumps({
+                "verdict": "APPROVE",
+                "summary": "All good now",
+                "findings": [],
+                "criteria_met": ["Tests pass"],
+                "criteria_unmet": [],
+            })
+        return _reconcile_json(
+            addressed=["Fix bug A"],
+            remaining=["Add missing test"],
+        )
+
+    result = invoke_reviewer(
+        ReviewInput(
+            pr_diff="+ fixed stuff",
+            acceptance_criteria=["Tests pass"],
+            pr_title="fix: rework",
+            file_names=["a.py"],
+            rework_round=1,
+            prior_comments=["Fix bug A", "Add missing test"],
+        ),
+        llm=mock_llm,
+    )
+    assert result.verdict == "REQUEST_CHANGES"
+    assert result.prior_issues_remaining == ["Add missing test"]
+
+
+def test_normalize_clean_rework_approves():
+    """Clean rework: all prior addressed, no unmet criteria, no errors → APPROVE."""
+    call_count = 0
+
+    def mock_llm(messages):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return json.dumps({
+                "verdict": "APPROVE",
+                "summary": "Everything addressed",
+                "findings": [
+                    {"file": "a.py", "line": 1, "body": "Good refactor",
+                     "severity": "info", "category": "code_quality"},
+                ],
+                "criteria_met": ["Tests pass", "Clean code"],
+                "criteria_unmet": [],
+            })
+        return _reconcile_json(
+            addressed=["Fix bug", "Add test"],
+            remaining=[],
+        )
+
+    result = invoke_reviewer(
+        ReviewInput(
+            pr_diff="+ clean code",
+            acceptance_criteria=["Tests pass", "Clean code"],
+            pr_title="fix: final rework",
+            file_names=["a.py"],
+            rework_round=2,
+            prior_comments=["Fix bug", "Add test"],
+        ),
+        llm=mock_llm,
+    )
+    assert result.verdict == "APPROVE"
+    assert result.criteria_unmet == []
+    assert result.prior_issues_remaining == []
+    assert result.prior_issues_addressed == ["Fix bug", "Add test"]
