@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from graphs.planner import DeliveryPlan, PlannerInput, invoke_planner
+from graphs.reviewer import ReviewAnalysis, ReviewInput, invoke_reviewer
 
 
 def _invoke_planner(input_data: dict[str, Any], llm: Callable | None) -> dict[str, Any]:
@@ -23,9 +24,24 @@ def _invoke_planner(input_data: dict[str, Any], llm: Callable | None) -> dict[st
     return plan.model_dump()
 
 
+def _invoke_reviewer(input_data: dict[str, Any], llm: Callable | None) -> dict[str, Any]:
+    review_input = ReviewInput(
+        pr_diff=input_data.get("pr_diff", ""),
+        acceptance_criteria=input_data.get("acceptance_criteria", []),
+        pr_title=input_data.get("pr_title", ""),
+        pr_body=input_data.get("pr_body", ""),
+        file_names=input_data.get("file_names", []),
+        rework_round=input_data.get("rework_round", 0),
+        prior_comments=input_data.get("prior_comments", []),
+    )
+    result: ReviewAnalysis = invoke_reviewer(review_input, llm=llm)
+    return result.model_dump()
+
+
 # graph_name → handler(input_data, llm) → dict
 REGISTRY: dict[str, Callable[[dict[str, Any], Callable | None], dict[str, Any]]] = {
     "planner": _invoke_planner,
+    "reviewer-shadow": _invoke_reviewer,
 }
 
 GRAPH_NAMES: list[str] = list(REGISTRY.keys())
