@@ -21,8 +21,8 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, "src")
 
-# Set required env before importing app
-os.environ.setdefault("GRAPH_EXECUTOR_TOKEN", "test-secret-token")
+# Set required env before importing app — force override to ensure test token matches
+os.environ["GRAPH_EXECUTOR_TOKEN"] = "test-secret-token"
 # Explicit stub mode for tests (no LLM required)
 os.environ["GRAPH_STUB_MODE"] = "1"
 os.environ.pop("LLM_BASE_URL", None)
@@ -156,3 +156,46 @@ def test_llm_required_when_stub_mode_off():
             os.environ["GRAPH_STUB_MODE"] = original_stub
         if original_llm:
             os.environ["LLM_BASE_URL"] = original_llm
+
+
+# ── Reviewer Shadow ─────────────────────────────────────────────────
+
+
+def test_reviewer_shadow_invoke_returns_typed_output():
+    """POST /v1/graphs/reviewer-shadow/invoke returns structured ReviewAnalysis output."""
+    resp = client.post(
+        "/v1/graphs/reviewer-shadow/invoke",
+        json={
+            "input": {
+                "pr_diff": "+ added new feature code",
+                "acceptance_criteria": ["Tests pass", "No security issues"],
+                "pr_title": "feat: add feature",
+                "pr_body": "Adds a new feature",
+                "file_names": ["src/main.py"],
+                "rework_round": 0,
+                "prior_comments": [],
+            },
+            "config": {"temperature": 0.2, "max_tokens": 2000},
+        },
+        headers=AUTH,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "completed"
+    assert "run_id" in body
+    assert body["metadata"]["graph_name"] == "reviewer-shadow"
+    output = body["output"]
+    assert output["verdict"] in ("APPROVE", "REQUEST_CHANGES")
+    assert "summary" in output
+    assert "findings" in output
+    assert "criteria_met" in output
+    assert "criteria_unmet" in output
+    assert isinstance(output["is_rework"], bool)
+
+
+def test_reviewer_shadow_health_listed():
+    """/health includes 'reviewer-shadow' in graphs list."""
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "reviewer-shadow" in body["graphs"]
