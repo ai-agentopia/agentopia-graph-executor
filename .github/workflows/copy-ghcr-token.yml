@@ -1,0 +1,28 @@
+name: Copy GHCR_TOKEN to agentopia-super-rag (one-time)
+
+# ONE-TIME OPERATION — delete this file after successful run
+# Purpose: GHCR_TOKEN is configured in this repo but not in agentopia-super-rag.
+# This workflow uses GHCR_TOKEN to authenticate gh CLI and set the same token
+# as a secret in agentopia-super-rag so its CI can push to GHCR.
+#
+# Tracks: ai-agentopia/agentopia-super-rag#24 (atomic cutover)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  copy-secret:
+    name: Copy GHCR_TOKEN to agentopia-super-rag
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set GHCR_TOKEN in agentopia-super-rag
+        env:
+          # Use GHCR_TOKEN itself to authenticate — must have repo scope to write secrets
+          GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          SECRET_VALUE: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          echo "Setting GHCR_TOKEN in ai-agentopia/agentopia-super-rag..."
+          echo "$SECRET_VALUE" | gh secret set GHCR_TOKEN \
+            --repo ai-agentopia/agentopia-super-rag
+          echo "Done. Verify at: https://github.com/ai-agentopia/agentopia-super-rag/settings/secrets/actions"
